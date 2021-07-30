@@ -226,4 +226,131 @@ inline bool is_neg(const Tensor& tensor) {
   return tensor.is_neg();
 }
 
+// My changes are below
+
+// From build/aten/src/ATen/NativeMetaFunctions.h
+namespace meta {
+  struct TORCH_API structured_add_Tensor : public TensorIteratorBase {
+    void meta(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha);
+  };
+} //namespace meta
+
+// From build/aten/src/ATen/NativeFunctions.h
+namespace native {
+  struct TORCH_API structured_add_out : public at::meta::structured_add_Tensor {
+    void impl(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha, const at::Tensor & out);
+  };
+} //namespace native
+
+// From build/ATen/RegisterCPU.cpp
+// functional version
+struct structured_add_out_functional final : public at::native::structured_add_out {
+
+    void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
+                    TensorOptions options, DimnameList names) override {
+
+
+        if (strides.empty()) {
+            outputs_[output_idx] = at::native::empty_cpu(sizes, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt(), options.memory_format_opt());
+        } else {
+            // TODO: assert options.memory_format_opt() is nullopt (debug only?)
+            outputs_[output_idx] = at::native::empty_strided_cpu(sizes, strides, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+        }
+
+        if (!names.empty()) {
+          namedinference::propagate_names(*outputs_[output_idx], names);
+        }
+        // super must happen after, so that downstream can use maybe_get_output
+        // to retrieve the output
+        at::native::structured_add_out::set_output(output_idx, sizes, strides, options, names);
+    }
+
+    const Tensor& maybe_get_output(int64_t output_idx) override {
+        return *outputs_[output_idx];
+    }
+    std::array<c10::ExclusivelyOwned<Tensor>, 1> outputs_;
+};
+
+inline Tensor wrapper_add_Tensor(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
+  structured_add_out_functional op;
+  op.meta(self, other, alpha);
+  op.impl(self, other, alpha, *op.outputs_[0]);
+  return std::move(op.outputs_[0]).take();
 }
+
+TORCH_API inline at::Tensor add(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha=1) {
+  return wrapper_add_Tensor(input1, input2, alpha);
+}
+
+// DEFINE_DISPATCH(add_stub); // Add this namespace 'at::native'?
+
+// From BinaryOps.cpp
+TORCH_META_FUNC2(add, Tensor) (
+  const Tensor& self, const Tensor& other, const Scalar& alpha
+) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+  native::alpha_check(dtype(), alpha);
+}
+
+// From BinaryOps.cpp
+TORCH_IMPL_FUNC(add_out) (
+  const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
+) {
+  add_stub(device_type(), *this, alpha);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
+}
+
+// From build/ATen/RegisterCPU.cpp
+// out version
+struct structured_add_out_out final : public at::native::structured_add_out {
+    structured_add_out_out(Tensor& out0) : outputs_{ std::ref(out0) } {}
+
+    void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
+                    TensorOptions options, DimnameList names) override {
+
+        const auto& out = outputs_[output_idx].get();
+        TORCH_CHECK(options.dtype() == out.dtype(),
+            "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
+        TORCH_CHECK(options.device() == out.device(),
+            "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
+        bool resized = at::native::resize_output(outputs_[output_idx], sizes);
+        // Only restride if a resize occurred; otherwise we ignore the (advisory)
+        // strides from the meta function and directly use the output tensor's
+        // preexisting strides
+        if (resized) {
+            if (!strides.empty()) {
+                TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+                at::native::as_strided_(outputs_[output_idx], sizes, strides);
+            } else if (options.memory_format_opt().has_value()) {
+                outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+            }
+        }
+
+        if (!names.empty()) {
+          namedinference::propagate_names(outputs_[output_idx], names);
+        }
+        // super must happen after, so that downstream can use maybe_get_output
+        // to retrieve the output
+        at::native::structured_add_out::set_output(output_idx, sizes, strides, options, names);
+    }
+
+    const Tensor& maybe_get_output(int64_t output_idx) override {
+        return outputs_[output_idx];
+    }
+    std::array<std::reference_wrapper<Tensor>, 1> outputs_;
+};
+
+inline Tensor & wrapper_add_out_out(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha, at::Tensor & out) {
+  structured_add_out_out op(out);
+  op.meta(self, other, alpha);
+  op.impl(self, other, alpha, op.outputs_[0]);
+  return out;
+}
+
+TORCH_API inline at::Tensor & add_out(at::Tensor & out, const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha=1) {
+  return wrapper_add_out_out(input1, input2, alpha, out);
+}
+
+// TODO: Need to find and put the declarations of op.meta() and op.impl() in the right place
+
+} //namespace at

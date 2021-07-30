@@ -184,6 +184,11 @@ class TORCH_API Tensor {
     return strides()[dim];
   }
 
+  at::Tensor add(const at::Tensor & other, const at::Scalar & alpha=1) const;
+  at::Tensor & add_(const at::Tensor & other, const at::Scalar & alpha=1) const;
+  at::Tensor add(const at::Scalar & other, const at::Scalar & alpha=1) const;
+  at::Tensor & add_(const at::Scalar & other, const at::Scalar & alpha=1) const;
+
   TensorImpl * unsafeGetTensorImpl() const {
     return impl_.get();
   }
@@ -1151,5 +1156,27 @@ inline c10::MaybeOwned<Tensor> Tensor::expect_contiguous(MemoryFormat memory_for
   } else {
     return c10::MaybeOwned<Tensor>::owned(__dispatch_contiguous(memory_format));
   }
+}
+} // namespace at
+
+namespace at {
+
+inline at::Tensor Tensor::add(const at::Tensor & other, const at::Scalar & alpha) const {
+  return at::_ops::add_Tensor::call(const_cast<Tensor&>(*this), other, alpha);
+}
+
+// aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+inline at::Tensor & Tensor::add_(const at::Tensor & other, const at::Scalar & alpha) const {
+  return at::_ops::add__Tensor::call(const_cast<Tensor&>(*this), other, alpha);
+}
+
+// aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+inline at::Tensor Tensor::add(const at::Scalar & other, const at::Scalar & alpha) const {
+  return at::_ops::add_Scalar::call(const_cast<Tensor&>(*this), other, alpha);
+}
+
+// aten::add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+inline at::Tensor & Tensor::add_(const at::Scalar & other, const at::Scalar & alpha) const {
+  return at::_ops::add__Scalar::call(const_cast<Tensor&>(*this), other, alpha);
 }
 } // namespace at

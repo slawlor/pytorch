@@ -2,6 +2,8 @@
 
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 
