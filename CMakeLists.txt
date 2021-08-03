@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 #cmake_policy(SET CMP0022 NEW)
 #cmake_policy(SET CMP0023 NEW)
 
@@ -313,9 +313,9 @@ option(WERROR "Build with -Werror supported by the compiler" OFF)
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
   if(CCACHE_PROGRAM)
-    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    set(CMAKE_CUDA_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "C compiler launcher")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "CXX compiler launcher")
+    set(CMAKE_CUDA_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "CUDA compiler launcher")
   else()
     message(STATUS "Could not find ccache. Consider installing ccache to speed up compilation.")
   endif()
@@ -494,16 +494,22 @@ if(MSVC)
   endforeach(flag_var)
 
   # Try harder
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/w" "-w")
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
 endif(MSVC)
 
-list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
-list(APPEND CUDA_NVCC_FLAGS_DEBUG "-Xfatbin" "-compress-all")
-list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-Xfatbin" "-compress-all")
+if(CMAKE_HOST_SYSTEM_NAME MATCHES "Windows")
+  # Windows cmd.exe has a 8191 character limit for commands
+  # This moves argments into a file to avoid going over the limit
+  set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS 1)
+  set(CMAKE_CUDA_RESPONSE_FILE_LINK_FLAG "@")
+  set(CMAKE_NINJA_FORCE_RESPONSE_FILE 1 CACHE INTERNAL "")
+endif()
+
+string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
 if(NOT MSVC)
-  list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
-  list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")
+  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -g -lineinfo --source-in-ptx")
+  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -g -lineinfo --source-in-ptx")
 endif(NOT MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
